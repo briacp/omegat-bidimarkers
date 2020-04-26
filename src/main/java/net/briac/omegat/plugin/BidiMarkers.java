@@ -47,11 +47,19 @@ public class BidiMarkers extends AbstractMarker {
 
     private static final List<Mark> EMPTY_LIST = Collections.emptyList();
 
+    private static final int LRM = 0x200e;
+    private static final int RLM = 0x200f;
     private static final int LRE = 0x202a;
     private static final int RLE = 0x202b;
     private static final int PDF = 0x202c;
 
-    static final HighlightPainter BIDI_PAINTER = new BidiUnderliner(true,
+    static final HighlightPainter LRE_BIDI_PAINTER = new BidiUnderliner(LRE,
+            Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
+    static final HighlightPainter RLE_BIDI_PAINTER = new BidiUnderliner(RLE,
+            Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
+    static final HighlightPainter LRM_BIDI_PAINTER = new BidiUnderliner(LRM,
+            Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
+    static final HighlightPainter RLM_BIDI_PAINTER = new BidiUnderliner(RLM,
             Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
 
     static {
@@ -81,18 +89,54 @@ public class BidiMarkers extends AbstractMarker {
         List<Mark> marks = new ArrayList<>();
 
         int startPos = -1;
+        int markCodePoint = -1;
         for (int i = 0, cp; i < text.length(); i += Character.charCount(cp)) {
             cp = text.codePointAt(i);
 
-            if (cp == LRE || cp == RLE) {
-                startPos = i;
-            } else if (cp == PDF && startPos != -1) {
+            if (!(cp == LRE || cp == RLE || cp == LRM || cp == RLM || cp == PDF)) {
+                continue;
+            }
+
+            LOGGER.finest("Mark " + bidiName(cp) + " found at pos " + i + ".");
+
+            if (cp == PDF && startPos != -1) {
                 Mark mark = new Mark(Mark.ENTRY_PART.TRANSLATION, startPos, i);
-                mark.painter = BIDI_PAINTER;
+                switch (markCodePoint) {
+                case LRE:
+                    mark.painter = LRE_BIDI_PAINTER;
+                    break;
+                case RLE:
+                    mark.painter = RLE_BIDI_PAINTER;
+                    break;
+                }
                 marks.add(mark);
+                LOGGER.finest("Add mark for " + bidiName(markCodePoint) + " pos " + startPos + ":" + i + ".");
 
                 startPos = -1;
+                markCodePoint = -1;
+            } else if (cp == LRM || cp == RLM) {
+                Mark mark = new Mark(Mark.ENTRY_PART.TRANSLATION, i, i);
+                switch (cp) {
+                case LRM:
+                    mark.painter = LRM_BIDI_PAINTER;
+                    break;
+                case RLM:
+                    mark.painter = RLM_BIDI_PAINTER;
+                    break;
+                }
+                marks.add(mark);
+                LOGGER.finest("Add mark for " + bidiName(cp) + " pos " + i + ".");
+            } else {
+                markCodePoint = cp;
+                startPos = i;
             }
+        }
+        
+        if (startPos != -1) {
+            LOGGER.finest("Lone mark " + bidiName(markCodePoint) + " found at pos " + startPos + ".");
+            Mark mark = new Mark(Mark.ENTRY_PART.TRANSLATION, startPos, startPos);
+            mark.painter = markCodePoint == LRM ? LRM_BIDI_PAINTER : RLM_BIDI_PAINTER;
+            marks.add(mark);
         }
 
         return marks;
@@ -105,46 +149,103 @@ public class BidiMarkers extends AbstractMarker {
 
     private static final class BidiUnderliner extends Underliner {
         protected final Color color;
-        private boolean lre;
-        private static final BasicStroke BIDI_STROKE = new BasicStroke(2);
-        private static final int MARKER_SIZE = 6;
-        
-        private int heightOffset = -3;
-        private int widthOffset = -3;
+        protected final int bidi;
 
-        public BidiUnderliner(boolean b, Color c) {
-            lre = b;
+        // The marker should be positioned slightly above the text
+        private static final int HEIGHT_OFFSET = -3;
+        
+        // Height of the descending lines
+        private static final int MARKER_HEIGHT = 6;
+
+        private static final float STROKE_WIDTH = 1f;
+
+        private static final BasicStroke BIDI_STROKE = new BasicStroke(STROKE_WIDTH);
+
+        public BidiUnderliner(int b, Color c) {
+            bidi = b;
             color = c;
         }
 
         @Override
         protected void paint(Graphics g, Rectangle rect, JTextComponent c) {
+            LOGGER.finest("Paint " + bidiName(bidi) + " " + rect.x + " -> " + (rect.x + rect.width));
             g.setColor(color);
 
-            int dir = lre ? -1 : 1;
-            int halfHeight = rect.height / 2;
+            int dir = bidi == LRE || bidi == LRM ? -1 : 1;
 
-            int y = rect.y + heightOffset ;
-            int x1 = rect.x + widthOffset;
+            int y = rect.y + HEIGHT_OFFSET;
+            int x1 = rect.x;
             int x2 = rect.x + rect.width;
 
             Stroke oldStroke = ((Graphics2D) g).getStroke();
             ((Graphics2D) g).setStroke(BIDI_STROKE);
 
             Polygon p = new Polygon();
-            // Draw start bidi char
-            p.addPoint(x1, y + halfHeight);
-            p.addPoint(x1, y);
-            p.addPoint(x1 - dir * MARKER_SIZE * 2, y);
-            p.addPoint(x1, y);
-            g.drawPolygon(p);
 
-            // Draw PDF
-            g.drawArc(x2, y, MARKER_SIZE, MARKER_SIZE, 0, 360);
+            // Draw starting bidi mark
+            switch (bidi) {
 
-            // line
-            //g.drawLine(x1, y, x2, y);
+            case RLM:
+            case LRM:
+                p.addPoint(x1, y + MARKER_HEIGHT);
+                p.addPoint(x1, y);
+                p.addPoint(x1 - dir * MARKER_HEIGHT, y);
+                p.addPoint(x1, y + MARKER_HEIGHT);
+                g.fillPolygon(p);
+                g.drawPolygon(p);
+                break;
+
+            case RLE:
+                p.addPoint(x2 + 1, y + MARKER_HEIGHT);
+                p.addPoint(x2 + 1, y);
+                p.addPoint(x2 + 1 - dir * MARKER_HEIGHT, y);
+                p.addPoint(x2 + 1, y + MARKER_HEIGHT);
+                g.drawPolygon(p);
+                
+                // Draw PDF Mark
+                g.drawLine(x1, y, x1, y + MARKER_HEIGHT);
+
+                // Line
+                g.drawLine(x1, y, x2+1, y);
+                break;
+
+            case LRE:
+                p.addPoint(x1 + 1, y + MARKER_HEIGHT);
+                p.addPoint(x1 + 1, y);
+                p.addPoint(x1 + 1 - dir * MARKER_HEIGHT, y);
+                p.addPoint(x1 + 1, y + MARKER_HEIGHT);
+                g.drawPolygon(p);
+                
+                // Draw PDF Mark
+                g.drawLine(x2, y, x2, y + MARKER_HEIGHT);
+
+                // Line
+                g.drawLine(x1 + 1 , y, x2, y);
+                break;
+
+            default:
+                break;
+            }
+
             ((Graphics2D) g).setStroke(oldStroke);
+        }
+    }
+    
+    // For debug only
+    private static String bidiName(int i) {
+        switch (i) {
+        case LRE:
+            return "LRE";
+        case LRM:
+            return "LRM";
+        case RLE:
+            return "LRE";
+        case RLM:
+            return "RLM";
+        case PDF:
+            return "PDF";
+        default:
+            return "???";
         }
     }
 }
