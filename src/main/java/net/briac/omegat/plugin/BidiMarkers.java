@@ -53,13 +53,13 @@ public class BidiMarkers extends AbstractMarker {
     private static final int RLE = 0x202b;
     private static final int PDF = 0x202c;
 
-    static final HighlightPainter LRE_BIDI_PAINTER = new BidiUnderliner(LRE,
+    static final HighlightPainter LRE_BIDI_PAINTER = new BidiPainter(LRE,
             Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
-    static final HighlightPainter RLE_BIDI_PAINTER = new BidiUnderliner(RLE,
+    static final HighlightPainter RLE_BIDI_PAINTER = new BidiPainter(RLE,
             Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
-    static final HighlightPainter LRM_BIDI_PAINTER = new BidiUnderliner(LRM,
+    static final HighlightPainter LRM_BIDI_PAINTER = new BidiPainter(LRM,
             Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
-    static final HighlightPainter RLM_BIDI_PAINTER = new BidiUnderliner(RLM,
+    static final HighlightPainter RLM_BIDI_PAINTER = new BidiPainter(RLM,
             Styles.EditorColor.COLOR_BIDIMARKERS.getColor());
 
     static {
@@ -97,7 +97,7 @@ public class BidiMarkers extends AbstractMarker {
                 continue;
             }
 
-            LOGGER.finest("Mark " + bidiName(cp) + " found at pos " + i + ".");
+            LOGGER.finer("Bidi char " + bidiName(cp) + " found at pos " + i + ".");
 
             if (cp == PDF && startPos != -1) {
                 Mark mark = new Mark(Mark.ENTRY_PART.TRANSLATION, startPos, i);
@@ -110,12 +110,12 @@ public class BidiMarkers extends AbstractMarker {
                     break;
                 }
                 marks.add(mark);
-                LOGGER.finest("Add mark for " + bidiName(markCodePoint) + " pos " + startPos + ":" + i + ".");
+                LOGGER.finer("Add embedding for " + bidiName(markCodePoint) + " pos " + startPos + ":" + i + ".");
 
                 startPos = -1;
                 markCodePoint = -1;
             } else if (cp == LRM || cp == RLM) {
-                Mark mark = new Mark(Mark.ENTRY_PART.TRANSLATION, i, i);
+                Mark mark = new Mark(Mark.ENTRY_PART.TRANSLATION, i, i+1);
                 switch (cp) {
                 case LRM:
                     mark.painter = LRM_BIDI_PAINTER;
@@ -125,7 +125,7 @@ public class BidiMarkers extends AbstractMarker {
                     break;
                 }
                 marks.add(mark);
-                LOGGER.finest("Add mark for " + bidiName(cp) + " pos " + i + ".");
+                LOGGER.finer("Add mark for " + bidiName(cp) + " pos " + i + ".");
             } else {
                 markCodePoint = cp;
                 startPos = i;
@@ -133,9 +133,9 @@ public class BidiMarkers extends AbstractMarker {
         }
         
         if (startPos != -1) {
-            LOGGER.finest("Lone mark " + bidiName(markCodePoint) + " found at pos " + startPos + ".");
+            LOGGER.finer("Lone bidi char " + bidiName(markCodePoint) + " found at pos " + startPos + ".");
             Mark mark = new Mark(Mark.ENTRY_PART.TRANSLATION, startPos, startPos);
-            mark.painter = markCodePoint == LRM ? LRM_BIDI_PAINTER : RLM_BIDI_PAINTER;
+            mark.painter = markCodePoint == LRE ? LRE_BIDI_PAINTER : RLE_BIDI_PAINTER;
             marks.add(mark);
         }
 
@@ -147,12 +147,12 @@ public class BidiMarkers extends AbstractMarker {
         return true; // Core.getEditor().getSettings().isMarkBidi();
     }
 
-    private static final class BidiUnderliner extends Underliner {
+    private static final class BidiPainter extends Underliner {
         protected final Color color;
         protected final int bidi;
 
         // The marker should be positioned slightly above the text
-        private static final int HEIGHT_OFFSET = -3;
+        private static final int HEIGHT_OFFSET = 0;
         
         // Height of the descending lines
         private static final int MARKER_HEIGHT = 6;
@@ -161,14 +161,13 @@ public class BidiMarkers extends AbstractMarker {
 
         private static final BasicStroke BIDI_STROKE = new BasicStroke(STROKE_WIDTH);
 
-        public BidiUnderliner(int b, Color c) {
+        public BidiPainter(int b, Color c) {
             bidi = b;
             color = c;
         }
 
         @Override
         protected void paint(Graphics g, Rectangle rect, JTextComponent c) {
-            LOGGER.finest("Paint " + bidiName(bidi) + " " + rect.x + " -> " + (rect.x + rect.width));
             g.setColor(color);
 
             int dir = bidi == LRE || bidi == LRM ? -1 : 1;
@@ -177,6 +176,8 @@ public class BidiMarkers extends AbstractMarker {
             int x1 = rect.x;
             int x2 = rect.x + rect.width;
 
+            LOGGER.finer("Paint mark " + bidiName(bidi) + " at " + x1 + "/" + x2 + ".");
+            
             Stroke oldStroke = ((Graphics2D) g).getStroke();
             ((Graphics2D) g).setStroke(BIDI_STROKE);
 
